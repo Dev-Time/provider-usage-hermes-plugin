@@ -81,9 +81,14 @@ nanogpt-usage/
   `transform_llm_output`. Whether Hermes runs every hook (two footer lines) or
   stops at the first non-None result (only one) is not verified — check after
   install; if only one survives, that is core behavior, not a bug here.
-- **Live payload unverified**: the read-only probe against the real key was
-  never run (first attempt timed out awaiting consent). `live_check.py` is the
-  first post-approval step and must print a real payload before this is trusted.
+- **Live payload verified 2026-10-05** with the real key:
+  `NanoGPT: wk 14% (-3%) 5.9d · img 0% 20.5h` — `active: true`, `state: active`,
+  `routing.recommendedMode: subscription`. This account's `dailyInputTokens` is
+  `null` (no daily window) and is correctly omitted; `limits` also carries
+  `period`, `provider`, `stripeSubscriptionId` and cancellation fields the
+  plugin ignores. Response keys beyond the docs' example:
+  `allowOverage`, `cancelAt`, `cancelAtPeriodEnd`, `canceledAt`,
+  `cancellationReason`, `endedAt`, `graceUntil`, `providerStatus`.
 - Daily window semantics (calendar day vs rolling 24h) are not documented;
   pacing assumes `resetAt − 24h`.
 
