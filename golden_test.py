@@ -21,8 +21,8 @@ LIVE_SHAPE = {
 
 
 def run(plugin, data):
-    plugin._state = {"data": data, "fetched_at": 0.0}
-    plugin._fetch_usage = lambda: plugin._state.get("data")
+    plugin._fetch_nano = lambda: data
+    plugin._fetch_opencode = lambda: None
     return plugin.transform_llm_output("Body text.", model="m", platform="telegram", session_id="s")
 
 
@@ -63,6 +63,6 @@ def no_emphasis_wrapper():
 
 if __name__ == "__main__":
     g = golden()
-    print("GOLDEN:", g)
+    print("GOLDEN:", repr(g))
     assert content_differs() and wrapper_invariant() and no_emphasis_wrapper()
     print("ALL GOLDEN CHECKS PASS")

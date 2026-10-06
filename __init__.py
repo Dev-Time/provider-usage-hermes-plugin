@@ -1,5 +1,5 @@
-"""NanoGPT usage plugin — appends subscription quota percentages to the final
-gateway message footer via transform_llm_output."""
+"""Provider usage footer — appends NanoGPT and OpenCode Go subscription usage
+to the final gateway message via transform_llm_output."""
 
 import json
 import logging
@@ -10,61 +10,92 @@ from urllib.request import Request, urlopen
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_USAGE_URL = "https://api.nano-gpt.com/api/subscription/v1/usage"
-_state = {"data": None, "fetched_at": 0.0}
+NANO_USAGE_URL = "https://api.nano-gpt.com/api/subscription/v1/usage"
+OPENCODE_USAGE_URL = "https://opencode.ai/zen/go/v1/usage"
+_USER_AGENT = "hermes-agent/0.21 (provider-usage-plugin)"
 
-# quota key -> (label, window seconds); span drives pacing only, resetAt drives
-# the countdown. `tokens` (token trial) has no documented window: no pacing.
-_QUOTAS = (
+_state = {
+    "nano": {"data": None, "fetched_at": 0.0},
+    "opencode": {"data": None, "fetched_at": 0.0},
+}
+
+# NanoGPT quota key -> (label, window seconds); span drives pacing only, resetAt
+# drives the countdown. `tokens` (token trial) has no documented window: no pace.
+_NANO_QUOTAS = (
     ("dailyInputTokens", "day", 86400),
     ("weeklyInputTokens", "wk", 7 * 86400),
     ("dailyImages", "img", 86400),
     ("tokens", "tok", None),
 )
-_PREFIX = "NanoGPT: "
+# OpenCode window key -> (label, window length); monthly derives its span from
+# its own resetsAt (previous calendar month, 28-31 days).
+_GO_WINDOWS = (("rolling", "5h"), ("weekly", "wk"), ("monthly", "mo"))
+_GO_SPANS = {"rolling": 5 * 3600, "weekly": 7 * 86400}
 
 
 def _ttl():
     try:
-        return max(1.0, float(os.environ.get("NANOGPT_USAGE_TTL_SECONDS")))
+        return max(1.0, float(os.environ.get("USAGE_TTL_SECONDS")))
     except (TypeError, ValueError):
         return 120.0
 
 
-def _api_key():
+def _nano_key():
     for name in ("NANOGPT_API_KEY", "HERMES_CUSTOM_API_NANO_GPT_COM_API_KEY"):
         key = os.environ.get(name, "")
         if key:
             return key
+    return _resolved_key("custom:nanogpt", "nano")
+
+
+def _opencode_key():
+    for name in ("OPENCODE_GO_API_KEY", "OPENCODE_ZEN_API_KEY"):
+        key = os.environ.get(name, "")
+        if key:
+            return key
+    return _resolved_key("opencode-go", "opencode")
+
+
+def _resolved_key(requested, needle):
+    """Runtime-provider fallback, guarded so one provider's key is never sent to
+    another host (the resolver falls back to OpenRouter when the ask is absent)."""
     try:
         from hermes_cli.runtime_provider import resolve_runtime_provider
-        runtime = resolve_runtime_provider(requested="custom:nanogpt")
-        # Never send another provider's key to nano-gpt.com (custom providers
-        # resolve down the ladder to OpenRouter when the requested one is absent).
-        if "nano" in str(runtime.get("provider") or "").lower():
+        runtime = resolve_runtime_provider(requested=requested)
+        if needle in str(runtime.get("provider") or "").lower():
             return str(runtime.get("api_key") or "").strip()
     except Exception:
         pass
     return ""
 
 
-def _fetch_usage():
-    if _state["data"] and time.monotonic() - _state["fetched_at"] < _ttl():
-        return _state["data"]
-    key = _api_key()
+def _fetch(which, url, key_fn):
+    # Cache first: the resolver must run at most once per TTL, not per message.
+    state = _state[which]
+    if state["data"] and time.monotonic() - state["fetched_at"] < _ttl():
+        return state["data"]
+    key = key_fn()
     if not key:
         return None
     try:
-        req = Request(DEFAULT_USAGE_URL, headers={"Authorization": f"Bearer {key}",
-                                                  "User-Agent": "hermes-agent/0.21 (nanogpt-usage-plugin)"})
+        req = Request(url, headers={"Authorization": f"Bearer {key}",
+                                    "User-Agent": _USER_AGENT})
         with urlopen(req, timeout=8) as resp:
             data = json.loads(resp.read().decode())
-        _state["data"] = data
-        _state["fetched_at"] = time.monotonic()
+        state["data"] = data
+        state["fetched_at"] = time.monotonic()
         return data
     except Exception as exc:
-        logger.debug("nanogpt-usage fetch failed: %s", exc)
+        logger.debug("%s usage fetch failed: %s", which, exc)
         return None
+
+
+def _fetch_nano():
+    return _fetch("nano", NANO_USAGE_URL, _nano_key)
+
+
+def _fetch_opencode():
+    return _fetch("opencode", OPENCODE_USAGE_URL, _opencode_key)
 
 
 def _compact_time(seconds) -> str:
@@ -76,14 +107,26 @@ def _compact_time(seconds) -> str:
     return f"{seconds // 60}m"
 
 
-def _resets_in(reset_at) -> str:
-    """Countdown from resetAt (UNIX epoch milliseconds — not ISO like opencode)."""
+def _resets_ms(reset_at) -> str:
+    """Countdown from resetAt (UNIX epoch milliseconds)."""
     if not isinstance(reset_at, (int, float)) or reset_at <= 0:
         return ""
     seconds = int(reset_at / 1000 - time.time())
-    if seconds <= 0:
-        return "now"
-    return _compact_time(seconds)
+    return "now" if seconds <= 0 else _compact_time(seconds)
+
+
+def _resets_iso(resets_at) -> str:
+    """Countdown from an ISO-8601 resetsAt (OpenCode shape)."""
+    text = str(resets_at or "").replace("Z", "+00:00").strip()
+    try:
+        from datetime import datetime, timezone
+        reset = datetime.fromisoformat(text)
+        if reset.tzinfo is None:
+            reset = reset.replace(tzinfo=timezone.utc)
+        seconds = int((reset - datetime.now(timezone.utc)).total_seconds())
+    except ValueError:
+        return ""
+    return "now" if seconds <= 0 else _compact_time(seconds)
 
 
 def _pacing(percent, reset_at, span, now=None) -> str:
@@ -92,35 +135,73 @@ def _pacing(percent, reset_at, span, now=None) -> str:
         return ""
     if now is None:
         now = time.time()
-    end = reset_at / 1000.0
-    start = end - span
-    if span <= 0:
-        return ""
+    start = reset_at / 1000.0 - span
     if now < start:
         return ""  # reset sits further out than the assumed window: span is wrong
     expected = max(0.0, min(1.0, (now - start) / span)) * 100
-    delta = float(percent) - expected
+    return _pace_verdict(float(percent) - expected)
+
+
+def _pacing_iso(percent, resets_at, span=None, now=None) -> str:
+    """Same verdict from an ISO resetsAt; monthly span = the month before reset."""
+    if percent is None:
+        return ""
+    from datetime import datetime, timezone
+    text = str(resets_at or "").replace("Z", "+00:00").strip()
+    try:
+        reset = datetime.fromisoformat(text)
+        if reset.tzinfo is None:
+            reset = reset.replace(tzinfo=timezone.utc)
+    except ValueError:
+        return ""
+    if now is None:
+        now = datetime.now(timezone.utc)
+    if span is None:
+        span = _one_month_like(reset).total_seconds()
+    start = reset.timestamp() - span
+    if span <= 0 or now.timestamp() < start:
+        return ""
+    expected = max(0.0, min(1.0, (now.timestamp() - start) / span)) * 100
+    return _pace_verdict(float(percent) - expected)
+
+
+def _pace_verdict(delta) -> str:
     magnitude = int(abs(delta) + 0.5)  # rounds half away from zero
     if magnitude == 0:
         return "+0%"  # zero never renders as -0%
     return f"{'+' if delta > 0 else '-'}{magnitude}%"
 
 
+def _one_month_like(reset):
+    """Span of the month preceding reset (28-31 days, calendar-correct)."""
+    from datetime import timedelta
+    y, m = reset.year, reset.month
+    if m == 1:
+        y, m = y - 1, 12
+    else:
+        m -= 1
+    prev = reset.replace(y, m)  # same day-of-month in the previous month
+    return timedelta(days=(reset - prev).days)
+
+
 # Single source of truth for the footer wrapper: plain text, no emphasis markers.
 _FOOTER_MD = "{line}"
 
-# "NanoGPT: <label> <pct>…" — the bare `wk`/`\d+h`/`mo` shapes belong to the
-# opencode-usage plugin and must never be swallowed by this one. `%` or `?` is
-# REQUIRED after the number: without it the bare labels match prose lines
-# ("day 1 of the sprint", "img 2048x2048 upscale") and delete them.
-_FOOTER_ROW_RE = re.compile(r"^(?:NanoGPT: (?:day|wk|img|tok)|(?:day|img|tok)) (?:\d+(?:\.\d+)?%|\?)")
+# Both row families belong to THIS plugin now: NanoGPT rows carry the provider
+# prefix, OpenCode rows are `5h/wk/mo <n>%` or `Go: …`. `%`/`?` after the number
+# is required on the bare NanoGPT labels — without it prose ("day 1 of the
+# sprint", "img 2048x2048 upscale") matches and gets deleted.
+_NANO_ROW_RE = re.compile(r"^(?:NanoGPT: (?:day|wk|img|tok)|(?:day|img|tok)) (?:\d+(?:\.\d+)?%|\?)")
+_GO_ROW_RE = re.compile(r"^(?:Go: )?(?:\d+h|wk|mo) \d+(?:\.\d+)?%")
 
 
 def _is_footer_line(line: str) -> bool:
     s = line.strip().strip(" *_`")
     if s.startswith("NanoGPT:") and (" · " in s or s == "NanoGPT: ..."):
         return True
-    return bool(_FOOTER_ROW_RE.match(s))
+    if s.startswith("Go:") and (" · " in s or s.endswith("...")):
+        return True
+    return bool(_NANO_ROW_RE.match(s)) or bool(_GO_ROW_RE.match(s))
 
 
 def _strip_footers(text: str) -> str:
@@ -154,24 +235,27 @@ def _segment_text(segment):
     return text
 
 
-def _render_footer(segments, budget=_BUDGET):
-    """L0 single line -> L1 drop the first reset -> one line per quota."""
+def _render_footer(segments, budget=_BUDGET, lead="", row=None):
+    """L0 single line -> L1 drop the first reset -> one line per quota.
+    `lead` prefixes L0/L1, `row` prefixes each line of the L2 fallback."""
     if not segments:
         return ""
-    full = _PREFIX + " · ".join(_segment_text(s) for s in segments)
+    if row is None:
+        row = lead
+    full = lead + " · ".join(_segment_text(s) for s in segments)
     if len(full) <= budget:
         return full
     label, pct, pace, _ = segments[0]
     trimmed = [(label, pct, pace, "")] + list(segments[1:])
-    one_line = _PREFIX + " · ".join(_segment_text(s) for s in trimmed)
+    one_line = lead + " · ".join(_segment_text(s) for s in trimmed)
     if len(one_line) <= budget:
         return one_line
-    return "\n".join(_PREFIX + _segment_text(s) for s in segments)
+    return "\n".join(row + _segment_text(s) for s in segments)
 
 
-def _segments(data):
+def _nano_segments(data):
     out = []
-    for key, label, span in _QUOTAS:
+    for key, label, span in _NANO_QUOTAS:
         quota = data.get(key)
         if not isinstance(quota, dict):
             continue  # window not configured for this account
@@ -187,15 +271,35 @@ def _segments(data):
                 continue  # one malformed quota must not kill the whole footer
             pct = str(int(round(percent)))
             pace = _pacing(percent, quota.get("resetAt"), span)
-        out.append((label, pct, pace, _resets_in(quota.get("resetAt"))))
+        out.append((label, pct, pace, _resets_ms(quota.get("resetAt"))))
+    return out
+
+
+def _opencode_segments(data):
+    windows = data.get("usage") or {}
+    out = []
+    for key, label in _GO_WINDOWS:
+        w = windows.get(key)
+        if isinstance(w, dict) and w.get("percent") is not None:
+            pct = w["percent"]
+            pace = _pacing_iso(pct, w.get("resetsAt"), span=_GO_SPANS.get(key))
+            out.append((label, str(pct), pace, _resets_iso(w.get("resetsAt"))))
     return out
 
 
 def _usage_line():
-    data = _fetch_usage()
-    if not data:
-        return ""
-    return _render_footer(_segments(data))
+    lines = []
+    nano = _fetch_nano()
+    if nano:
+        line = _render_footer(_nano_segments(nano), lead="NanoGPT: ")
+        if line:
+            lines.append(line)
+    go = _fetch_opencode()
+    if go:
+        line = _render_footer(_opencode_segments(go), row="Go: ")
+        if line:
+            lines.append(line)
+    return "\n".join(lines)
 
 
 def transform_llm_output(response_text, model=None, platform=None, session_id=None, **kwargs):
@@ -215,7 +319,7 @@ def transform_llm_output(response_text, model=None, platform=None, session_id=No
             return (body + "\n\n" if body else "") + _FOOTER_MD.format(line=line)
         return cleaned if has_footer else None
     except Exception as exc:
-        logger.debug("nanogpt-usage transform failed: %s", exc)
+        logger.debug("provider-usage transform failed: %s", exc)
         return None
 
 
@@ -241,7 +345,7 @@ def _strip_message_content(content):
 
 
 def strip_footers_from_request(**kwargs):
-    """llm_request middleware: drop this plugin's footer rows from assistant history."""
+    """llm_request middleware: drop footer rows from assistant history."""
     try:
         request = kwargs.get("request")
         if not isinstance(request, dict):
@@ -268,10 +372,10 @@ def strip_footers_from_request(**kwargs):
                 new_request[key] = new_items
         if not changed:
             return None
-        return {"request": new_request, "source": "nanogpt-usage",
+        return {"request": new_request, "source": "provider-usage",
                 "reason": "strip usage footers from history"}
     except Exception as exc:
-        logger.debug("nanogpt-usage request strip failed: %s", exc)
+        logger.debug("provider-usage request strip failed: %s", exc)
         return None
 
 

@@ -1,12 +1,14 @@
-# DESIGN — nanogpt-usage
+# DESIGN — provider-usage (merged nanogpt-usage + opencode-usage)
 
-Status: approved by Wyatt 2026-10-05 (clarify: "Go, build it", quotas only,
-git init, no push). Research below, implementation notes at the end.
+Status: two approvals from Wyatt, both 2026-10-05. First: "Go, build it"
+(NanoGPT quota footer, quotas only, git init, no push). Second, after the
+independent review: "Merge: one plugin renders both footers", name
+`provider-usage`. Research below, merge record at the end.
 
 ## Goal
 
 Same niche as `opencode-usage`: an automatic usage footer on gateway messages,
-for NanoGPT instead of OpenCode Go. Workspace `/workspace/nanogpt-usage-plugin`,
+for NanoGPT (now merged with OpenCode Go). Workspace `/workspace/provider-usage-plugin`,
 reference implementation `/workspace/opencode-usage-plugin`.
 
 ## Endpoints researched 2026-10-05 (docs.nano-gpt.com)
@@ -61,10 +63,32 @@ Window start = `resetAt` − span. Guard: when `resetAt` is further out than the
 assumed span (span guess wrong, or a longer window), pacing returns `""`
 instead of a misleading verdict.
 
+## Why one plugin (the merge)
+
+Core only ever applies ONE `transform_llm_output` result per turn — see
+"Open questions" below — so two footer plugins cannot coexist. Decision:
+merge both render paths into this plugin, then disable `opencode-usage`.
+What changed in the merge:
+
+- Directory renamed `nanogpt-usage-plugin` → `provider-usage-plugin`
+  (git history preserved); manifest `name: provider-usage`.
+- Two fetchers behind one `_fetch(which, url, key_fn)` with a per-provider
+  cache; key ladders stay isolated (`_nano_key` → nano-gpt.com,
+  `_opencode_key` → opencode.ai), both falling back to the guarded
+  runtime-provider resolver.
+- `_render_footer(segments, budget, lead, row)`: NanoGPT rows carry the
+  `NanoGPT: ` prefix on every line; OpenCode rows keep the exact live shape
+  (no lead on L0/L1, `Go: ` on the L2 fallback) — no visual change to the
+  footer already in production.
+- Matcher owns BOTH row families (`_NANO_ROW_RE` + `_GO_ROW_RE`), so history
+  cleanup no longer depends on which plugin is installed.
+- Tests: `test_render`/`test_pacing` cover both ladders and both
+  reset/pacing encodings; `test_dedup` expects one block, one row per provider.
+
 ## Repo shape
 
 ```
-nanogpt-usage/
+provider-usage/
 ├── __init__.py        # fetch + render + echo strip + llm_request middleware
 ├── plugin.yaml        # hooks, provides_middleware, requires_env (secret)
 ├── README.md          # user-facing: footer, install, config, troubleshooting

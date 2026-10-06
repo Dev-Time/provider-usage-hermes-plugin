@@ -1,5 +1,5 @@
-name: nanogpt-usage
-description: Shows NanoGPT subscription quota usage (daily/weekly input tokens, images) as a footer on gateway messages
+name: provider-usage
+description: Shows NanoGPT and OpenCode Go subscription usage as a footer on gateway messages
 version: 0.1.0
 author: Dev-Time
 license: MIT
@@ -11,6 +11,10 @@ provides_middleware:
   - llm_request
 requires_env:
   - name: NANOGPT_API_KEY
-    description: NanoGPT API key (the same key you use for the nano-gpt provider)
+    description: NanoGPT API key (its line is omitted when unset)
     url: https://nano-gpt.com/api
+    secret: true
+  - name: OPENCODE_GO_API_KEY
+    description: OpenCode Go API key (its line is omitted when unset)
+    url: https://opencode.ai/zen
     secret: true

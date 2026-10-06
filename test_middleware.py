@@ -20,7 +20,7 @@ out = mw(request={"messages": [
     {"role": "assistant", "content": f"answer\n\n{FOOTER_A}"},
     {"role": "user", "content": "next"},
 ]})
-assert out is not None and out["source"] == "nanogpt-usage" and out["reason"]
+assert out is not None and out["source"] == "provider-usage" and out["reason"]
 assert out["request"]["messages"][1]["content"] == "answer", out["request"]["messages"][1]
 assert out["request"]["messages"][0] == {"role": "user", "content": "hi"}
 assert out["request"]["messages"][2] == {"role": "user", "content": "next"}
@@ -37,9 +37,10 @@ rows = [{"role": r, "content": FOOTER_A} for r in ("user", "system")] + \
 assert mw(request={"messages": rows}) is None
 print("non-assistant rows untouched OK")
 
-# the other plugin's footer row is not ours to strip
-assert mw(request={"messages": [{"role": "assistant", "content": f"answer\n\n{OPENCODE}"}]}) is None
-print("opencode rows untouched OK")
+# both row families are ours to strip now
+out = mw(request={"messages": [{"role": "assistant", "content": f"answer\n\n{OPENCODE}"}]})
+assert out["request"]["messages"][0]["content"] == "answer", out
+print("opencode rows stripped OK")
 
 assert mw(request={"messages": [{"role": "assistant", "content": "para one\n\n\npara two"}]}) is None
 print("clean rows byte-identical OK")

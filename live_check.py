@@ -3,7 +3,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-# Outside the gateway the key is not in the environment yet; load the user's
+# Outside the gateway the keys are not in the environment yet; load the user's
 # .env directly so this one command works from a plain shell.
 for path in (os.path.expanduser("~/.hermes/.env"), "/hermes/.env"):
     try:
@@ -17,7 +17,9 @@ for path in (os.path.expanduser("~/.hermes/.env"), "/hermes/.env"):
     except OSError:
         pass
 
-from __init__ import _api_key, _usage_line
+import __init__ as p
 
-print("key present:", bool(_api_key()), "(env names, value hidden)")
-print("LIVE:", _usage_line() or "(no data)")
+print("nano key:", bool(p._nano_key()), "| opencode key:", bool(p._opencode_key()))
+print("LIVE:")
+line = p._usage_line()
+print(line or "  (no data)")
