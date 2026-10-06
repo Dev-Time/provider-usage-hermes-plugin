@@ -70,9 +70,13 @@ for row in (L0, L1, "NanoGPT: day 6% 3.2h", "NanoGPT: wk 7% 3.2d",
             "Go: 5h 6% 1.1h", "wk 7% 1.3d", "mo 42% 20d",
             "_Go: 5h 6% · wk 7% · mo 42%_", "Go: ..."):
     assert _is_footer_line(row), row
+# ordinary prose/code is never a footer row — including the prefix-match
+# family (label + pct + trailing words), which the end-anchor must reject
 for other in ("Just a reply.", "Go buy milk", "Go to the store",
               "day 1 of the challenge", "img 500 files scanned",
               "img 2048x2048 upscale", "day 30.", "tok 42 for later",
+              "day 50% more than expected", "img 3% larger than baseline",
+              "tok 9% of the budget went", "wk 3% chance of rain tomorrow",
               "NanoGPT: the full name is ...", "NanoGPT: pricing changed today"):
     assert not _is_footer_line(other), other
 

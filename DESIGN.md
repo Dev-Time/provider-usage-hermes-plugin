@@ -44,15 +44,18 @@ Payload facts that drive the code:
 
 ## Rendering contract
 
-- Prefix every emitted line with `NanoGPT: `. Mandatory, not cosmetic: the
-  opencode-usage matcher eats bare `wk …` / `mo …` / `<n>h …` rows, so a
-  bare-leading nanogpt row would be deleted by the *other* plugin and vice
-  versa. `_FOOTER_ROW_RE` in this plugin likewise refuses bare `wk`/`mo`/`<n>h`.
+- NanoGPT lines carry the `NanoGPT: ` prefix (originally required so the
+  opencode-usage matcher could not eat them; now simply how the row reads).
+  OpenCode rows keep the exact live shape: no lead on L0/L1, `Go: ` on L2.
+- Matcher owns BOTH families and is **end-anchored**: `label + pct` is only a
+  footer row when the rest of the line is empty, a pace/reset tail
+  (`(+12%)`, `3.2h`, `19d`, `now`), or starts ` · `. Prose such as
+  `day 50% more than expected` is not a row and is never stripped.
 - Ladder identical to the reference: L0 single line → L1 drops the first
   segment's reset → one line per quota, `_BUDGET` = 50 visible chars.
 - Pace renders only past 10% usage; label/pct/reset order unchanged.
 - Footer wrapper is the single plain-text template `_FOOTER_MD = "{line}"`
-  (golden test enforces one definition, two render sites, no emphasis markers).
+  (golden test enforces one definition, one render site, no emphasis markers).
 - Gateway-only: `platform == "cli"` (and unset) is left untouched.
 
 ## Pacing windows
@@ -108,11 +111,12 @@ provider-usage/
   (`plugins_dispatch.py:229`, `for cb in self._hooks.get(hook_name, [])`), and plugin
   load order is dependency-order with alphabetical ties
   (`plugins_manifest.py:219-265`, `keys = sorted(manifests.keys())`) — so
-  `nanogpt-usage` registers before `opencode-usage` and WINS. Installing this plugin
-  alongside the deployed one makes the `Go: …` footer disappear. A decision is needed
-  before any install: pick one plugin, or merge both render paths into one plugin
-  (a single hook that returns both rows). Nothing is corrupted either way — each
-  plugin's detector only touches its own row shapes.
+  `nanogpt-usage` registered before `opencode-usage` and would have won (decision:
+  merge both render paths — see "Why one plugin"). **After the rename the sort key
+  flipped**: `provider-usage` now sorts AFTER `opencode-usage`, so if the old plugin
+  is left enabled, `opencode-usage` wins — the `Go: …` row renders and the NanoGPT
+  row silently never appears. Fail-safe direction (no content loss), but it makes
+  disabling `opencode-usage` a mandatory part of deploying this plugin.
 - **Live payload verified 2026-10-05** with the real key:
   `NanoGPT: wk 14% (-3%) 5.9d · img 0% 20.5h` — `active: true`, `state: active`,
   `routing.recommendedMode: subscription`. This account's `dailyInputTokens` is
@@ -137,9 +141,9 @@ multi-account support, LiteLLM-proxy spend tracking (separate tool if wanted).
   rendered `day ?%` (now `day ?`, and the matcher accepts `?`), and pacing
   produced `+50%` for an image quota whose reset was 30d out (now returns no
   verdict when `now < resetAt − span`).
-- Cross-plugin safety is asserted in both suites: this plugin never strips
-  `Go: … / 5h / wk / mo` rows, and `test_middleware` proves the opencode row
-  passes through the llm_request strip untouched.
+- After the merge this plugin owns BOTH row families: `test_middleware` now
+  asserts `Go: …` rows ARE stripped from assistant history (before the merge
+  the opposite was asserted, while two plugins shared the row shapes).
 - `git init` only, no remote (per approval).
 
 ## Review fixes (2026-10-05, independent review → verified then applied)
@@ -169,3 +173,26 @@ Both blockers were reproduced by execution before the fix, not taken on trust:
    (output is plain, `golden_test` forbids markers), the coexistence claim, and
    `after-install.md` now loads `~/.hermes/.env` before `live_check.py` (otherwise
    it prints `key present: False` from outside the gateway process).
+
+## Second review fixes (2026-10-06, merged plugin — reproduced, then fixed)
+
+1. **Matcher still ate prose by prefix** — requiring `%`/`?` was not enough:
+   `_ROW_RE` matched `label + pct` at the START of a line with no line-shape
+   requirement, so `day 50% more than expected`, `img 3% larger than baseline`,
+   `tok 9% of the budget went` and `wk 3% chance of rain tomorrow` were all
+   `True` and got stripped from replies and history. The match is now
+   end-anchored through `_looks_like_row`: after `label + pct` only an empty
+   remainder, a pace/reset tail, or ` · ` counts as a row. All four strings are
+   in `test_render.py`'s negative list; every emitted row shape stays positive.
+2. **Strip still rewrote blanks around an echoed footer** — the previous fix
+   gated the strip on a footer being present, but `_strip_footers` then collapsed
+   EVERY adjacent-blank pair in the text: a reply carrying a fenced block plus a
+   footer echo lost its fence's blank run. `_strip_footers` now removes the
+   footer row plus at most one blank line on each side (the separator the append
+   introduced) and touches nothing else. Covered by the new echo-strip block in
+   `test_dedup.py`.
+3. **Stale DESIGN sections corrected**: the rendering contract no longer claims
+   bare shapes are refused (they are owned and end-anchored now), the load-order
+   note records that `provider-usage` sorts AFTER `opencode-usage` (so a missed
+   disable loses the NanoGPT row, not the Go row), and the old "never strips
+   `Go:` rows" claim is reversed to match `test_middleware`.

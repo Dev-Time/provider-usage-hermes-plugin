@@ -90,6 +90,16 @@ def main():
         assert run(body, nano=None, go=None) is None, f"changed with no data -> {body!r}"
     print("append-only: footer-less replies untouched OK")
 
+    # an echo must cost only its own line + the separator it was appended with:
+    # blanks elsewhere (fences, paragraph runs) stay byte-identical
+    fence = "Example:\n\n```\nx = 1\n\n\n\ny = 2\n```"
+    out = run(fence + "\n\nNanoGPT: day 5% · wk 6%")
+    assert out.startswith(fence), f"fence rewritten -> {out!r}"
+    para = "para one\n\n\n\npara two"
+    out = run(para + "\n\nNanoGPT: day 5% · wk 6%")
+    assert out.startswith(para), f"paragraph run rewritten -> {out!r}"
+    print("echo strip leaves surrounding blanks alone OK")
+
     # one provider down: the other still renders, as a single-row block
     out = run(CLEAN, nano=None)
     assert len(footers(out)) == 1 and footers(out)[0].startswith("5h"), out

@@ -187,12 +187,22 @@ def _one_month_like(reset):
 # Single source of truth for the footer wrapper: plain text, no emphasis markers.
 _FOOTER_MD = "{line}"
 
-# Both row families belong to THIS plugin now: NanoGPT rows carry the provider
-# prefix, OpenCode rows are `5h/wk/mo <n>%` or `Go: …`. `%`/`?` after the number
-# is required on the bare NanoGPT labels — without it prose ("day 1 of the
-# sprint", "img 2048x2048 upscale") matches and gets deleted.
-_NANO_ROW_RE = re.compile(r"^(?:NanoGPT: (?:day|wk|img|tok)|(?:day|img|tok)) (?:\d+(?:\.\d+)?%|\?)")
-_GO_ROW_RE = re.compile(r"^(?:Go: )?(?:\d+h|wk|mo) \d+(?:\.\d+)?%")
+# Both row families belong to THIS plugin now. A row is `label + pct` followed
+# by NOTHING, a pace/reset tail, or ` · ` — anything else is prose: without the
+# end-anchor, "day 50% more than expected" matches the prefix and gets deleted
+# from the reply and from history. `%`/`?` is required after the label.
+_ROW_RE = re.compile(r"(?:NanoGPT: )?(?:day|wk|img|tok) (?:\d+(?:\.\d+)?%|\?)"
+                     r"|(?:Go: )?(?:\d+h|wk|mo) \d+(?:\.\d+)?%")
+_TAIL_RE = re.compile(r"(?: \([+-]\d+%\))?(?: (?:\d+(?:\.\d+)?[dhm]|now))?")
+
+
+def _looks_like_row(s: str) -> bool:
+    m = _ROW_RE.match(s)
+    if not m:
+        return False
+    rest = s[m.end():]
+    after = rest[_TAIL_RE.match(rest).end():]
+    return after == "" or after.startswith(" · ")
 
 
 def _is_footer_line(line: str) -> bool:
@@ -201,18 +211,28 @@ def _is_footer_line(line: str) -> bool:
         return True
     if s.startswith("Go:") and (" · " in s or s.endswith("...")):
         return True
-    return bool(_NANO_ROW_RE.match(s)) or bool(_GO_ROW_RE.match(s))
+    return _looks_like_row(s)
 
 
 def _strip_footers(text: str) -> str:
-    kept = []
-    for ln in text.split("\n"):
-        if _is_footer_line(ln):
+    """Remove footer rows plus at most ONE blank line on each side — the
+    separator this plugin's append introduced. Blanks elsewhere (code fences,
+    paragraph runs) are never touched: removing a footer must not rewrite the
+    message around it."""
+    lines = text.split("\n")
+    out, pending = [], False
+    for line in lines:
+        if _is_footer_line(line):
+            if out and out[-1].strip() == "":
+                out.pop()
+            pending = True
             continue
-        if ln.strip() == "" and (not kept or kept[-1].strip() == ""):
+        if pending and line.strip() == "" and out and out[-1].strip() == "":
+            pending = False
             continue
-        kept.append(ln)
-    return "\n".join(kept).rstrip()
+        out.append(line)
+        pending = False
+    return "\n".join(out).rstrip()
 
 
 _BUDGET = 50  # visible chars per footer line
