@@ -77,10 +77,18 @@ nanogpt-usage/
 
 ## Open questions / risks
 
-- **Two footers**: `opencode-usage` and this plugin both register
-  `transform_llm_output`. Whether Hermes runs every hook (two footer lines) or
-  stops at the first non-None result (only one) is not verified — check after
-  install; if only one survives, that is core behavior, not a bug here.
+- **Two footers — ANSWERED 2026-10-05, only ONE footer can ever render.**
+  `agent/turn_finalizer.py:506-517` loops `_invoke_hook_safely("transform_llm_output", …)`
+  and breaks on the first non-empty string (`hermes_cli/plugins.py:111`: "return a
+  replacement string (first non-None wins)"). Callback order is registration order
+  (`plugins_dispatch.py:229`, `for cb in self._hooks.get(hook_name, [])`), and plugin
+  load order is dependency-order with alphabetical ties
+  (`plugins_manifest.py:219-265`, `keys = sorted(manifests.keys())`) — so
+  `nanogpt-usage` registers before `opencode-usage` and WINS. Installing this plugin
+  alongside the deployed one makes the `Go: …` footer disappear. A decision is needed
+  before any install: pick one plugin, or merge both render paths into one plugin
+  (a single hook that returns both rows). Nothing is corrupted either way — each
+  plugin's detector only touches its own row shapes.
 - **Live payload verified 2026-10-05** with the real key:
   `NanoGPT: wk 14% (-3%) 5.9d · img 0% 20.5h` — `active: true`, `state: active`,
   `routing.recommendedMode: subscription`. This account's `dailyInputTokens` is
@@ -109,3 +117,31 @@ multi-account support, LiteLLM-proxy spend tracking (separate tool if wanted).
   `Go: … / 5h / wk / mo` rows, and `test_middleware` proves the opencode row
   passes through the llm_request strip untouched.
 - `git init` only, no remote (per approval).
+
+## Review fixes (2026-10-05, independent review → verified then applied)
+
+Both blockers were reproduced by execution before the fix, not taken on trust:
+
+1. **Matcher deleted ordinary prose** — `_FOOTER_ROW_RE` required a number but no
+   `%`/`?`, so `day 1 of the challenge`, `img 500 files scanned`,
+   `img 2048x2048 upscale`, `day 30.` matched and were stripped from the delivered
+   reply AND from assistant history. Now `(?:\d+(?:\.\d+)?%|\?)`, plus
+   `_is_footer_line`'s `NanoGPT:` branch requires `" · "` or the exact degenerate
+   stub `NanoGPT: ...` (it used to fire on any `NanoGPT: …` line ending in `...`).
+   Survivors added to `test_render.py`'s negative list.
+2. **Transform was not append-only** — `_strip_footers` collapses blank-line runs
+   and ran on every reply, so a footer-less reply came back modified (fenced-code
+   blank lines included) and returned non-None even with no data. The strip is now
+   gated on `any(_is_footer_line(ln) …)`, mirroring the middleware gate the recipe
+   warns about, and the no-data comparison is `has_footer` instead of an asymmetric
+   `.strip()` diff. Covered by the new append-only block in `test_dedup.py`.
+3. **`NANOGPT_USAGE_URL` removed** — it forwarded the bearer key to any configured
+   host (forbidden: never forward a provider key to an arbitrary base URL); the
+   partner-domain case is speculative, so the endpoint is now a constant.
+4. **`_segments` guard** — a single malformed `percentUsed` now skips that quota
+   instead of raising out of `_usage_line` and killing the whole footer.
+5. Docs fixed to match verified behavior: README's surfaces claim (only `cli`/unset
+   are excluded; `desktop`/`tui`/`cron` DO get the footer), its italic example
+   (output is plain, `golden_test` forbids markers), the coexistence claim, and
+   `after-install.md` now loads `~/.hermes/.env` before `live_check.py` (otherwise
+   it prints `key present: False` from outside the gateway process).

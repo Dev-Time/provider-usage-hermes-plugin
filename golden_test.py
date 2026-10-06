@@ -48,7 +48,7 @@ def content_differs():
 def wrapper_invariant():
     src = open(PLUGIN_DIR + "/__init__.py").read()
     assert src.count('_FOOTER_MD = "{line}"') == 1, "footer wrapper must be a single template constant"
-    assert src.count("_FOOTER_MD.format(") == 2, "both emit sites must render the one template"
+    assert src.count("_FOOTER_MD.format(") == 1, "footer must render through the one template at a single emit site"
     assert "*{line}*" not in src and "_{line}_" not in src, "italic wrapper reintroduced"
     return True
 

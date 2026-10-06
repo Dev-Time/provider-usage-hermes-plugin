@@ -82,6 +82,16 @@ def main():
     assert len(footers(out)) == 1 and len(out.split("\n\n")) == 3, out
     print("opencode rows preserved OK")
 
+    # append-only: a reply carrying no footer row is returned byte-identical
+    # (the strip path also collapses blank lines — it must never run blind)
+    for body in ("para one\n\n\n\npara two",
+                 "text\n\n```\nx = 1\n\n\n\ny = 2\n```",
+                 "day 1 of the challenge\n\nimg 2048x2048 upscale"):
+        out = run(body)
+        assert isinstance(out, str) and out.startswith(body), f"body mutated -> {out!r}"
+        assert run(body, data=None) is None, f"no data, no footer, but changed -> {body!r}"
+    print("append-only: footer-less replies untouched OK")
+
     print("ALL DEDUP CHECKS PASS")
 
 

@@ -5,7 +5,7 @@ message (Telegram, Discord, Slack, …):
 
 > …reply text…
 >
-> _NanoGPT: day 25% 3.2h · wk 18% (-3%) 3.1d_
+> NanoGPT: day 25% 3.2h · wk 18% (-3%) 3.1d
 
 - **day / wk** — input-token quota for the daily and weekly windows
 - **img** — the daily image quota, when the account has one
@@ -14,9 +14,10 @@ message (Telegram, Discord, Slack, …):
 - **(pace …)** — ahead/under quota vs. the share of the window already
   elapsed, shown once a window passes 10% usage
 
-CLI/desktop sessions are intentionally left untouched; the footer is a
-gateway-message feature. Windows are read from the API response — nothing is
-hardcoded, and a window the account doesn't have simply isn't shown.
+Only CLI sessions are left untouched (the hook skips `platform == "cli"` and
+unset platforms) — `desktop`, `tui`, `cron` and the gateway platforms all carry
+the footer. Windows are read from the API response — nothing is hardcoded, and
+a window the account doesn't have simply isn't shown.
 
 ## Requirements
 
@@ -42,7 +43,6 @@ If Hermes asks a confusing tool-override question during enable, answer
 | Env var | Required | Default | Meaning |
 |---|---|---|---|
 | `NANOGPT_API_KEY` | yes | — | NanoGPT inference key. `HERMES_CUSTOM_API_NANO_GPT_COM_API_KEY` (the nano-gpt provider key) is picked up automatically as a fallback. |
-| `NANOGPT_USAGE_URL` | no | `https://api.nano-gpt.com/api/subscription/v1/usage` | Full usage endpoint override (partner domains use a different host). |
 | `NANOGPT_USAGE_TTL_SECONDS` | no | `120` | Cache lifetime for the usage payload. |
 
 Plan tier, limits and reset times come from the response itself — no other
@@ -58,8 +58,13 @@ hermes plugins disable nanogpt-usage
 
 - Quotas count **input tokens** (and images), not requests or dollars.
 - `percentUsed` may exceed 100%; a failed lookup renders `?`, never `0%`.
-- This plugin and `opencode-usage` can both be installed: each one strips and
-  appends only its own footer rows (`NanoGPT: …` vs `Go: … / 5h / wk / mo`).
+- **Coexistence with `opencode-usage`: only one footer can ever appear.**
+  Hermes takes the FIRST non-empty `transform_llm_output` result
+  (`agent/turn_finalizer.py` — "First hook to return a string wins") and plugin
+  load order is alphabetical (`resolve_plugin_load_order`), so `nanogpt-usage`
+  runs first and its result is used: with both installed the `Go: …` footer
+  disappears. Each plugin still strips only its own rows, so nothing is corrupted
+  — pick one, or combine both render paths in a single plugin.
 
 ## Uninstall
 

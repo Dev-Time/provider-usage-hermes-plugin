@@ -24,10 +24,6 @@ _QUOTAS = (
 _PREFIX = "NanoGPT: "
 
 
-def _usage_url():
-    return (os.environ.get("NANOGPT_USAGE_URL") or "").strip() or DEFAULT_USAGE_URL
-
-
 def _ttl():
     try:
         return max(1.0, float(os.environ.get("NANOGPT_USAGE_TTL_SECONDS")))
@@ -59,8 +55,8 @@ def _fetch_usage():
     if not key:
         return None
     try:
-        req = Request(_usage_url(), headers={"Authorization": f"Bearer {key}",
-                                             "User-Agent": "hermes-agent/0.21 (nanogpt-usage-plugin)"})
+        req = Request(DEFAULT_USAGE_URL, headers={"Authorization": f"Bearer {key}",
+                                                  "User-Agent": "hermes-agent/0.21 (nanogpt-usage-plugin)"})
         with urlopen(req, timeout=8) as resp:
             data = json.loads(resp.read().decode())
         _state["data"] = data
@@ -114,13 +110,15 @@ def _pacing(percent, reset_at, span, now=None) -> str:
 _FOOTER_MD = "{line}"
 
 # "NanoGPT: <label> <pct>…" — the bare `wk`/`\d+h`/`mo` shapes belong to the
-# opencode-usage plugin and must never be swallowed by this one. `?` = degraded.
-_FOOTER_ROW_RE = re.compile(r"^(?:NanoGPT: (?:day|wk|img|tok)|(?:day|img|tok)) (?:\d+(?:\.\d+)?|\?)")
+# opencode-usage plugin and must never be swallowed by this one. `%` or `?` is
+# REQUIRED after the number: without it the bare labels match prose lines
+# ("day 1 of the sprint", "img 2048x2048 upscale") and delete them.
+_FOOTER_ROW_RE = re.compile(r"^(?:NanoGPT: (?:day|wk|img|tok)|(?:day|img|tok)) (?:\d+(?:\.\d+)?%|\?)")
 
 
 def _is_footer_line(line: str) -> bool:
     s = line.strip().strip(" *_`")
-    if s.startswith("NanoGPT:") and (" · " in s or s.endswith("...")):
+    if s.startswith("NanoGPT:") and (" · " in s or s == "NanoGPT: ..."):
         return True
     return bool(_FOOTER_ROW_RE.match(s))
 
@@ -183,8 +181,12 @@ def _segments(data):
                 continue
             pct, pace = "?", ""  # lookup failed: unknown, never 0
         else:
-            pct = str(int(round(float(raw) * 100)))  # fraction -> percent
-            pace = _pacing(float(raw) * 100, quota.get("resetAt"), span)
+            try:
+                percent = float(raw) * 100  # fraction -> percent
+            except (TypeError, ValueError):
+                continue  # one malformed quota must not kill the whole footer
+            pct = str(int(round(percent)))
+            pace = _pacing(percent, quota.get("resetAt"), span)
         out.append((label, pct, pace, _resets_in(quota.get("resetAt"))))
     return out
 
@@ -202,13 +204,16 @@ def transform_llm_output(response_text, model=None, platform=None, session_id=No
             return None
         if not response_text or not response_text.strip():
             return None
-        cleaned = _strip_footers(response_text)
+        # Strip only when a footer row is actually present: _strip_footers also
+        # collapses blank-line runs (including inside code fences), and the
+        # contract is append-only — a footer-less reply must come back unchanged.
+        has_footer = any(_is_footer_line(ln) for ln in response_text.split("\n"))
+        cleaned = _strip_footers(response_text) if has_footer else response_text
         line = _usage_line()
         if line:
-            if cleaned:
-                return cleaned + "\n\n" + _FOOTER_MD.format(line=line)
-            return _FOOTER_MD.format(line=line)
-        return cleaned if cleaned != response_text.strip() else None
+            body = cleaned.rstrip()
+            return (body + "\n\n" if body else "") + _FOOTER_MD.format(line=line)
+        return cleaned if has_footer else None
     except Exception as exc:
         logger.debug("nanogpt-usage transform failed: %s", exc)
         return None

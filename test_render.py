@@ -52,7 +52,11 @@ for row in (L0, L1, "NanoGPT: day 6% 3.2h", "NanoGPT: wk 7% 3.2d",
             "**_NanoGPT: day 25% · wk 25%_**"):
     assert _is_footer_line(row), row
 for other in ("Just a reply.", "Go buy milk", "Go: 5h 6% · wk 7% · mo 42%",
-              "wk 7% 1.3d", "5h 6% 1.1h", "mo 42% 20d"):
+              "wk 7% 1.3d", "5h 6% 1.1h", "mo 42% 20d",
+              # ordinary prose/code must never be treated as a footer row
+              "day 1 of the challenge", "img 500 files scanned",
+              "img 2048x2048 upscale", "day 30.", "tok 42 for later",
+              "NanoGPT: the full name is ...", "NanoGPT: pricing changed today"):
     assert not _is_footer_line(other), other
 
 # end-to-end from a documented payload shape (percentUsed is a fraction)
