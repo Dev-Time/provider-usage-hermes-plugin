@@ -8,8 +8,8 @@ independent review: "Merge: one plugin renders both footers", name
 ## Goal
 
 Same niche as `opencode-usage`: an automatic usage footer on gateway messages,
-for NanoGPT (now merged with OpenCode Go). Workspace `/workspace/provider-usage-plugin`,
-reference implementation `/workspace/opencode-usage-plugin`.
+for NanoGPT (now merged with OpenCode Go). Reference implementation: the
+earlier `opencode-usage` plugin (same repo layout and test suite).
 
 ## Endpoints researched 2026-10-05 (docs.nano-gpt.com)
 
@@ -19,7 +19,7 @@ reference implementation `/workspace/opencode-usage-plugin`.
 | `GET https://nano-gpt.com/api/management/v1/subscription/usage` | management token, scope `usage:read` | same quotas, no routing |
 | `POST https://api.nano-gpt.com/api/check-balance` | `x-api-key` | `usd_balance`, `nano_balance`, `nanoDepositAddress` |
 
-Chosen: the inference-key endpoint — the key already exists on this box, and it
+Chosen: the inference-key endpoint — the same key already authenticates inference, and it
 adds `routing` (whether subscription quota is still available). Balance
 segment was explicitly declined (parity with opencode: quotas only).
 
@@ -36,8 +36,8 @@ Payload facts that drive the code:
 ## Credential resolution
 
 1. `NANOGPT_API_KEY` (declared in `plugin.yaml`, masked install prompt)
-2. `HERMES_CUSTOM_API_NANO_GPT_COM_API_KEY` — already present in `/hermes/.env`
-   and `/workspace/litellm/.env` (provider `custom:nanogpt`)
+2. `HERMES_CUSTOM_API_NANO_GPT_COM_API_KEY` — the name Hermes gives a
+   custom-provider key for a `nano-gpt.com` endpoint, when one is configured
 3. `resolve_runtime_provider(requested="custom:nanogpt")`, accepted only when
    the resolved provider name contains `nano` — never send another provider's
    key to nano-gpt.com.
