@@ -21,14 +21,15 @@ assert len(L0) == 55 and len(L1) == 50 <= _BUDGET
 out = _render_footer(NORMAL, budget=49, lead=NANO)
 assert out == "NanoGPT: day 6% 3.2h\nNanoGPT: wk 7% 3.2d\nNanoGPT: img 42% (-8%) 20.2d", out
 
-# OpenCode ladder: no lead on L0/L1 (matches the live footer), "Go: " on L2 rows
+# OpenCode ladder: "Go: " leads every line (L0/L1 and the L2 rows)
 GO = [("5h", "6", "", "3.2h"), ("wk", "7", "+12%", "3.2d"), ("mo", "42", "-8%", "20.2d")]
-assert _render_footer(GO, row="Go: ") == "5h 6% 3.2h · wk 7% 3.2d · mo 42% (-8%) 20.2d"
-assert _render_footer(GO, budget=38, row="Go: ") == \
+assert _render_footer(GO, lead="Go: ") == "Go: 5h 6% 3.2h · wk 7% 3.2d · mo 42% (-8%) 20.2d"
+assert _render_footer(GO, budget=38, lead="Go: ") == \
     "Go: 5h 6% 3.2h\nGo: wk 7% 3.2d\nGo: mo 42% (-8%) 20.2d"
 WORST = [("5h", "100", "", "5.0h"), ("wk", "100", "+100%", "7d"), ("mo", "100", "+100%", "30d")]
-assert _render_footer(WORST, row="Go: ") == "5h 100% · wk 100% (+100%) 7d · mo 100% (+100%) 30d"
-assert len(_render_footer(WORST, row="Go: ")) == 50 == _BUDGET
+assert _render_footer(WORST, lead="Go: ") == \
+    "Go: 5h 100% 5.0h\nGo: wk 100% (+100%) 7d\nGo: mo 100% (+100%) 30d"
+assert all(len(r) <= _BUDGET for r in _render_footer(WORST, lead="Go: ").split("\n"))
 
 # single quota, empty input, unknown (degraded) quota, absent fields
 assert _render_footer([("day", "25", "", "3.2h")], lead=NANO) == "NanoGPT: day 25% 3.2h"
@@ -108,7 +109,7 @@ assert len(rows) == 4, out
 assert rows[0] == "NanoGPT: day 100% (+21%) 5.0h", rows[0]
 assert rows[1] == "NanoGPT: wk 100% (+100%) 7d", rows[1]
 assert rows[2] == "NanoGPT: img 50% (-38%) 3.0h", rows[2]
-assert rows[3].startswith("5h 6%") and "wk 7%" in rows[3] and "mo 42%" in rows[3], rows[3]
+assert rows[3].startswith("Go: 5h 6%") and "wk 7%" in rows[3] and "mo 42%" in rows[3], rows[3]
 assert all(len(r) <= _BUDGET for r in rows), rows
 
 twice = p.transform_llm_output(out, platform="telegram")

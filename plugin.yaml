@@ -1,6 +1,6 @@
 name: provider-usage
 description: Shows NanoGPT and OpenCode Go subscription usage as a footer on gateway messages
-version: 0.1.0
+version: 0.1.1
 author: Dev-Time
 license: MIT
 hooks:

@@ -102,7 +102,7 @@ def main():
 
     # one provider down: the other still renders, as a single-row block
     out = run(CLEAN, nano=None)
-    assert len(footers(out)) == 1 and footers(out)[0].startswith("5h"), out
+    assert len(footers(out)) == 1 and footers(out)[0].startswith("Go: 5h"), out
     out = run(CLEAN, go=None)
     assert len(footers(out)) == 1 and footers(out)[0].startswith("NanoGPT:"), out
     print("single-provider degradation OK")

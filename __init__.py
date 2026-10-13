@@ -316,7 +316,7 @@ def _usage_line():
             lines.append(line)
     go = _fetch_opencode()
     if go:
-        line = _render_footer(_opencode_segments(go), row="Go: ")
+        line = _render_footer(_opencode_segments(go), lead="Go: ")
         if line:
             lines.append(line)
     return "\n".join(lines)

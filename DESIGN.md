@@ -46,7 +46,7 @@ Payload facts that drive the code:
 
 - NanoGPT lines carry the `NanoGPT: ` prefix (originally required so the
   opencode-usage matcher could not eat them; now simply how the row reads).
-  OpenCode rows keep the exact live shape: no lead on L0/L1, `Go: ` on L2.
+  OpenCode rows read the same way: `Go: ` prefixes every line (L0/L1 and L2).
 - Matcher owns BOTH families and is **end-anchored**: `label + pct` is only a
   footer row when the rest of the line is empty, a pace/reset tail
   (`(+12%)`, `3.2h`, `19d`, `now`), or starts ` · `. Prose such as
@@ -79,10 +79,8 @@ What changed in the merge:
   cache; key ladders stay isolated (`_nano_key` → nano-gpt.com,
   `_opencode_key` → opencode.ai), both falling back to the guarded
   runtime-provider resolver.
-- `_render_footer(segments, budget, lead, row)`: NanoGPT rows carry the
-  `NanoGPT: ` prefix on every line; OpenCode rows keep the exact live shape
-  (no lead on L0/L1, `Go: ` on the L2 fallback) — no visual change to the
-  footer already in production.
+- `_render_footer(segments, budget, lead, row)`: both providers prefix every
+  line — `NanoGPT: ` and `Go: ` on L0/L1 and on each L2 row.
 - Matcher owns BOTH row families (`_NANO_ROW_RE` + `_GO_ROW_RE`), so history
   cleanup no longer depends on which plugin is installed.
 - Tests: `test_render`/`test_pacing` cover both ladders and both
